@@ -1,8 +1,7 @@
 import heapq
 import time
 
-# Grid simbol
-# S: Start, G: Goal, T: Tower, .: Kosong
+# Grid
 grid = [
     ['S', '.', '.', 'T', '.', '.', '.'],
     ['.', 'T', '.', 'T', '.', 'T', '.'],
@@ -11,7 +10,7 @@ grid = [
     ['T', '.', '.', '.', 'T', 'T', 'G']
 ]
 
-# Tower dengan posisi, range, damage, dan cooldown
+# Tower data
 towers = {
     (0, 3): {'range': 1, 'damage': 3, 'cooldown': 2, 'cd_now': 0},
     (1, 1): {'range': 1, 'damage': 2, 'cooldown': 1, 'cd_now': 0},
@@ -22,6 +21,7 @@ towers = {
     (4, 5): {'range': 1, 'damage': 3, 'cooldown': 2, 'cd_now': 0}
 }
 
+# Cari start & goal
 start = goal = None
 for i in range(len(grid)):
     for j in range(len(grid[0])):
@@ -30,14 +30,11 @@ for i in range(len(grid)):
         elif grid[i][j] == 'G':
             goal = (i, j)
 
-# Heuristik Manhattan
+# Heuristik
 def heuristic(a, b):
     return abs(a[0] - b[0]) + abs(a[1] - b[1])
 
-# Arah gerakan
-directions = [(-1,0), (1,0), (0,-1), (0,1)]
-
-# GBFS dengan pelacakan jalur
+# GBFS
 def greedy_best_first_search(start, goal):
     visited = set()
     came_from = {}
@@ -51,7 +48,7 @@ def greedy_best_first_search(start, goal):
         if current in visited:
             continue
         visited.add(current)
-        for d in directions:
+        for d in [(-1,0), (1,0), (0,-1), (0,1)]:
             ni, nj = current[0] + d[0], current[1] + d[1]
             if 0 <= ni < len(grid) and 0 <= nj < len(grid[0]):
                 if grid[ni][nj] != 'T' and (ni, nj) not in visited:
@@ -73,61 +70,83 @@ def reconstruct_path(came_from, start, goal):
 def in_range(tower_pos, target_pos, range_val):
     return heuristic(tower_pos, target_pos) <= range_val
 
-def print_grid_with_enemy(path, pos, step):
-    print(f"\n📍 Step {step} | Posisi Musuh: {pos}")
+# Cetak grid
+def print_grid(enemies, step):
+    print(f"\n🔄 Step {step}")
+    grid_out = [['.' for _ in range(len(grid[0]))] for _ in range(len(grid))]
     for i in range(len(grid)):
         for j in range(len(grid[0])):
-            if (i, j) == pos:
-                print('E', end=' ')
-            elif (i, j) in path and grid[i][j] == '.':
-                print('*', end=' ')
-            else:
-                print(grid[i][j], end=' ')
-        print()
+            if grid[i][j] == 'T':
+                grid_out[i][j] = 'T'
+            elif grid[i][j] == 'S':
+                grid_out[i][j] = 'S'
+            elif grid[i][j] == 'G':
+                grid_out[i][j] = 'G'
+    for idx, e in enumerate(enemies):
+        if e['alive']:
+            ei, ej = e['pos']
+            grid_out[ei][ej] = f"E{idx+1}"
+    for row in grid_out:
+        print(' '.join(row))
 
-# Enemy setup
-enemy = {
-    'hp': 12,
-    'pos': start
-}
-
-# Simulasi jalan
-came_from = greedy_best_first_search(start, goal)
-path = reconstruct_path(came_from, start, goal)
+# Buat banyak musuh
+enemy_count = 3
+enemies = []
+for i in range(enemy_count):
+    came_from = greedy_best_first_search(start, goal)
+    path = reconstruct_path(came_from, start, goal)
+    enemies.append({
+        'id': i+1,
+        'hp': 10,
+        'path': path,
+        'step': 0,
+        'pos': start,
+        'alive': True,
+        'status': 'jalan'
+    })
 
 # Statistik
 total_damage = 0
 total_hits = 0
+step = 0
 
-print("\n--- SIMULASI DIMULAI ---")
-for step, pos in enumerate(path, 1):
-    enemy['pos'] = pos
-    print_grid_with_enemy(path, pos, step)
+# Simulasi
+print("\n=== SIMULASI MULTI MUSUH ===")
+while any(e['alive'] and e['status'] == 'jalan' for e in enemies):
+    step += 1
+    print_grid(enemies, step)
 
-    # Tower menyerang bila cooldown 0
-    for tower_pos, info in towers.items():
-        if info['cd_now'] == 0 and in_range(tower_pos, pos, info['range']):
-            enemy['hp'] -= info['damage']
-            total_damage += info['damage']
-            total_hits += 1
-            print(f"  💥 Tower {tower_pos} menyerang! (-{info['damage']} HP)")
-            info['cd_now'] = info['cooldown']  # reset cooldown
+    # Update posisi musuh
+    for e in enemies:
+        if e['alive'] and e['step'] < len(e['path']):
+            e['pos'] = e['path'][e['step']]
+            e['step'] += 1
+        elif e['alive'] and e['pos'] == goal:
+            e['status'] = 'lolos'
+
+    # Tower menyerang musuh dalam jangkauan
+    for t_pos, t in towers.items():
+        if t['cd_now'] == 0:
+            # Cari musuh dalam jangkauan
+            targets = [e for e in enemies if e['alive'] and in_range(t_pos, e['pos'], t['range'])]
+            if targets:
+                target = targets[0]  # ambil pertama saja
+                target['hp'] -= t['damage']
+                print(f"💥 Tower {t_pos} menyerang E{target['id']} (-{t['damage']})")
+                total_damage += t['damage']
+                total_hits += 1
+                if target['hp'] <= 0:
+                    target['alive'] = False
+                    target['status'] = 'mati'
+                t['cd_now'] = t['cooldown']
         else:
-            info['cd_now'] = max(0, info['cd_now'] - 1)
+            t['cd_now'] = max(0, t['cd_now'] - 1)
 
-    print(f"  ❤️ HP Musuh: {enemy['hp']}")
-    if enemy['hp'] <= 0:
-        print("❌ Musuh mati di tengah jalan.")
-        break
-    elif pos == goal:
-        print("🎯 Musuh berhasil mencapai tujuan!")
-        break
+    time.sleep(0.6)
 
-    time.sleep(0.7)
-
-print("\n--- SIMULASI SELESAI ---")
-print(f"\n📊 Statistik:")
-print(f"- Langkah dilalui: {step}")
-print(f"- Total serangan tower: {total_hits}")
-print(f"- Total damage diterima: {total_damage}")
-print(f"- Status akhir: {'Mati' if enemy['hp'] <= 0 else 'Lolos'}")
+print("\n=== SIMULASI SELESAI ===")
+for e in enemies:
+    print(f"- E{e['id']} status: {e['status']} | HP: {e['hp']}")
+print(f"\n📊 Statistik Total:")
+print(f"- Serangan Tower: {total_hits}")
+print(f"- Total Damage: {total_damage}")
